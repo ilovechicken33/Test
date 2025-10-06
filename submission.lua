@@ -1,5 +1,3 @@
-Hastebin
-
 local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -89,6 +87,8 @@ end
 local function playerOwnsTycoon(player: Player)
 	--This function checks if a player already owns a tycoon, which means they cant claim another one
 	for _, plr in Tycoon.ClaimedTycoons do
+		--Each tycoon claimed has a player's user id assigned to it
+		--If this userid matches with the player's user id, they already have a tycoon
 		if plr.UserId == player.UserId then
 			return true
 		end
@@ -102,13 +102,14 @@ local function displayButtonAffordability(player: Player, tycoonName: string, bu
 	if currentButtonInfo.ID ~= nil then return end
 	
 	local canAfford = player.leaderstats.Cash.Value >= currentButtonInfo.Price
+	--Shows the buttons affordability to the player on the client using a remote event (other players don't need to know)
 	Remotes.UpdateButtonAffordability:FireClient(player, tycoonName, buttonName, canAfford)
 end
 
 local function findAvailableTycoon(player: Player)
 	--This gives a player an available tycoon when they join the game. Gives them a little arrow leading toward the tycoon
 	for _, tycoon in workspace.Tycoons:GetChildren() do
-		if not Tycoon.ClaimedTycoons[tycoon] then
+		if not Tycoon.ClaimedTycoons[tycoon] then --Checks if the tycoon is in a dictionary of already claimed tycoons, if not, returns it to the player
 			return tycoon.Name
 		end
 	end
@@ -134,6 +135,7 @@ function Tycoon:End()
 	
 	if TycoonTemplate:FindFirstChild("Template") then
 		--This reverses everything that was done to the tycoon by the player--
+		--Basically respawns a clean copy of the tycoon from the original template in the same spot--
 		local backup = TycoonTemplate.Template:Clone()
 		local backupName = self.Tycoon.Name
 		local backupCFrame = self.Tycoon:GetPivot()
@@ -151,13 +153,15 @@ function Tycoon:End()
 	
 	self.Tycoon:Destroy()
 	
-	--Idk what exactly these do, I think it protects against memory leaks or something
+	--They clear any references to this tycoon to prevent memory leaks
 	setmetatable(self, nil)
 	table.clear(self)
 	table.freeze(self)
 end
 
 function Tycoon:Init()
+	
+	--Each one of the following components has its own class that handles its own logic separately from this code due to OOP
 	--Initialising all the buttons--
 	
 	local buttons = self.Tycoon.Buttons
@@ -256,6 +260,7 @@ function Tycoon.new(player: Player, tycoon: Model)
 		if part:FindFirstChildOfClass("ClickDetector") then continue end
 		
 		--This is for when another player goes through the tycoon door (owner only door?)
+		--If the part is solid (Transparency == 0) and it's not the owner, they get killed instantly--
 		part.Touched:Connect(function(hit: BasePart)
 			if hit.Parent:FindFirstChild("Humanoid") then
 				local plrWhoHit = Players:GetPlayerFromCharacter(hit.Parent)
@@ -268,9 +273,12 @@ function Tycoon.new(player: Player, tycoon: Model)
 	end
 	
 	--This is triggering the owner only door functionality--
+	--Basically, clicking the button toggles the door’s transparency--
 	door.Button.ClickDetector.MouseClick:Connect(function(playerWhoClicked: Player)
 		if playerWhoClicked == player then
 			for _, part in door:GetChildren() do
+				--This has to do with the structure of the door. Basically the button is in the door and we don't want the
+				--button to go invisible otherwise the player can't press it again
 				if part:FindFirstChildOfClass("ClickDetector") then continue end
 				
 				part.Transparency = if part.Transparency == 0 then 1 else 0
@@ -286,17 +294,21 @@ function Tycoon.new(player: Player, tycoon: Model)
 	local currentButtonValue = player.PrivateStats.CurrentButton.Value --Gets the value of the current button the player is on
 	
 	if currentButtonValue > 1 then --Hopefully saves myself a cheeky headache--
-		for _, unlockableType in playerItems:GetChildren() do
-			for _, child in unlockableType:GetChildren() do
+		for _, unlockableType in playerItems:GetChildren() do -- Looping through all of the unlockables in the tycoon
+			for _, child in unlockableType:GetChildren() do --Checking the type of the unlockable item.
 				local currentNum = tonumber(child.Name)
 				if not currentNum then continue end
 				
 				local currentButtonInfo = ButtonInfo.GetButtonInfo(child.Name)
 
 				if unlockableType.Name == "Buttons" then
+					--This code block handles unlocking the correct next button for the player based on their progress--
 					if currentNum == currentButtonValue + 1 then
 						
 						if currentButtonInfo.ID ~= nil then
+							--Checks for gamepass buttons and whether the player actually owns them--
+							--If the player doesn't own the gamepass, the button is not given to the player--
+							
 							if not player.PrivateStats.Gamepasses:FindFirstChild(currentButtonInfo.Display) then
 								child.Parent = tycoon.Buttons
 								local nextButton = unlockableType:FindFirstChild(currentNum + 1)
@@ -310,37 +322,41 @@ function Tycoon.new(player: Player, tycoon: Model)
 						end
 					end
 				else
+					--Moves previously purchased unlockables back into the tycoon so they reappear when loading in--
 					if currentNum <= currentButtonValue then
 						if currentButtonInfo.ID ~= nil then
+							--Checks if the player owns a button that can only be activated by a gamepass
 							if not player.PrivateStats.Gamepasses:FindFirstChild(currentButtonInfo.Display) then
 								continue
 							else
+								--This is the function associated to the gamepass.
 								PlayerManager.GamepassFunctions[currentButtonInfo.ID](player, currentButtonInfo.ID, true)
 							end
 						end
 						
+						--Positions the parent to the tycoon unlockables
 						child.Parent = tycoon.Unlockables:FindFirstChild(unlockableType.Name)
 					end
 				end
 			end
 		end
 		
-		if tycoon.Buttons:FindFirstChild("1") then
+		if tycoon.Buttons:FindFirstChild("1") then --Destroys the first tycoon button--
 			tycoon.Buttons:FindFirstChild("1"):Destroy()
 		end
 	end
 	
 	--Loading in all the droppers and stuff you know--
 	for _, unlockableType in tycoon.Unlockables:GetChildren() do
-		if Modules:FindFirstChild(unlockableType.Name) then
-			local module = require(Modules:FindFirstChild(unlockableType.Name))
+		if Modules:FindFirstChild(unlockableType.Name) then --Checks if there is a module for the unlockable type
+			local module = require(Modules:FindFirstChild(unlockableType.Name)) -- If there is, it requires the module
 			for _, child in unlockableType:GetChildren() do
-				local newObj = module.new(tycoon, child, player)
+				local newObj = module.new(tycoon, child, player) --Initialises an object for each individual object, assigns it to the player
 			end
 		end
 	end
 	
-	--All the affordability things yk--
+	--Displays if the player can afford a button--
 	for _, button in tycoon.Buttons:GetChildren() do
 		displayButtonAffordability(player, tycoon.Name, button.Name)
 	end
@@ -351,7 +367,7 @@ function Tycoon.new(player: Player, tycoon: Model)
 	cashConnection = player.leaderstats.Cash.Changed:Connect(function()
 		task.wait(1)
 		if not tycoon.Buttons then return end
-		if #tycoon.Buttons:GetChildren() >= 1 then --Otherwise nothings in there
+		if #tycoon.Buttons:GetChildren() >= 1 then --Ensures the buttons in the tycoon have loaded in
 			for _, button in tycoon.Buttons:GetChildren() do
 				displayButtonAffordability(player, tycoon.Name, button.Name)
 			end
@@ -368,13 +384,13 @@ function Tycoon.new(player: Player, tycoon: Model)
 	playerRemovingConnection = Players.PlayerRemoving:Connect(function(plrWhoLeft: Player)
 		if plrWhoLeft == player then
 			
-			--prevents memory leaks (I think)
+			--Disconnects this connection so it isnt called when the player's tycoon no longer exists. This saves game memory
 			cashConnection:Disconnect()
 			cashConnection = nil
 			
 			self:End()
 
-			--prevents memory leaks (i think)
+			--Disconnects this connection so it isnt called when the player's tycoon no longer exists. This saves game memory
 			playerRemovingConnection:Disconnect()
 			playerRemovingConnection = nil
 		end
@@ -387,6 +403,3 @@ end
 Remotes.FindAvailableTycoon.OnServerInvoke = findAvailableTycoon
 
 return Tycoon
-
-For immediate assistance, please email our customer support: support@toptal.com
-
